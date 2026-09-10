@@ -1,0 +1,136 @@
+/* ============ research page ============ */
+.rHero {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 64px 32px 12px;
+  text-align: center;
+}
+
+.rH1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin-top: 14px;
+}
+
+.rSub {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.rSection {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 26px 32px;
+}
+
+.rCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.rCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: 18px;
+  transition: box-shadow var(--dur-ui) var(--ease-out), transform var(--dur-ui) var(--ease-out);
+}
+
+.rCard:hover {
+  box-shadow: var(--shadow-card);
+  transform: translateY(-2px);
+}
+
+.rCardId {
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  color: var(--green-d);
+  font-weight: 700;
+}
+
+.rCardTitle {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 8px 0 6px;
+}
+
+.rCardBody {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.8;
+}
+
+.rPipeline {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  padding: 22px;
+}
+
+.rSvgWrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.rTable {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.rTable th,
+.rTable td {
+  padding: 9px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.rTable th {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--ink-2);
+  font-weight: 600;
+  background: rgba(23, 25, 28, 0.02);
+}
+
+.rTable tr:last-child td {
+  border-bottom: none;
+}
+
+.rTableId {
+  font-weight: 700;
+  color: var(--green-d);
+  font-variant-numeric: tabular-nums;
+}
+
+.techChips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.techChip {
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: var(--green-s);
+  color: var(--green-d);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rCta {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding: 20px 32px 72px;
+}
+
+.rFooterSpace {
+  height: 8px;
+}

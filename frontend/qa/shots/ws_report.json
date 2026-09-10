@@ -1,0 +1,28 @@
+{
+  "consoleErrors": [],
+  "requestFailed": [],
+  "steps": [
+    "ws_01_initial.png",
+    "INITIAL:{\"stepCount\":34,\"liveText\":\"正在执行「光照估计」…\",\"brand\":\"多模态图像合成 Agent\",\"hasCommandBar\":true}",
+    "ws_02_timeline_running.png",
+    "MID_RUN:{\"running\":1,\"done\":3,\"live\":\"正在执行「重打光」…\"}",
+    "ws_03_timeline_done.png",
+    "DONE_STATE:{\"running\":0,\"done\":7,\"failed\":0,\"live\":\"AI 自检 · 光照/阴影/色彩/边缘 全部通过\"}",
+    "ws_04_cmd_cafe.png",
+    "CMD_BG:hashBefore=-2022332177 hashAfter=-324638694 lenBefore=4058142 lenAfter=3852822 changed=true live=\"AI 自检 · 光照/阴影/色彩/边缘 全部通过\"",
+    "ws_05_cmd_dark.png",
+    "CMD_DARK:live=\"AI 自检 · 光照/阴影/色彩/边缘 全部通过\"",
+    "ws_06_tab_assets.png",
+    "TAB_ASSETS:{\"sections\":[\"上传素材\",\"原图 / 主体\",\"背景预设\",\"合成结果（3）\"],\"bgPresets\":4}",
+    "ws_07_tab_params.png",
+    "TAB_CHAT:{\"bubbles\":23,\"lastBubble\":\"五维检查完成：光照、阴影、色彩、边缘全部通过。光照94阴影91色彩95边缘97总体9517:52:37\"}",
+    "ws_08_tab_chat.png",
+    "ws_09_cmd_feather.png",
+    "CMD_FEATHER:live=\"AI 自检 · 光照/阴影/色彩/边缘 全部通过\"",
+    "ws_10_step_popup.png",
+    "STEP_POPUP:{\"hasModal\":true,\"title\":\"主体抠图 · matting\"}",
+    "CMD_BAR:{\"hasInput\":true,\"hasMic\":true,\"hasSend\":true,\"chips\":[\"改成傍晚\",\"光线太冷了\",\"阴影轻一点\",\"边缘延伸一下\",\"光线暗一点\",\"换回原版背景，保留现在的光线\",\"让人物开始呼吸\"]}",
+    "ANIM: total=9 running=9 infinite=9",
+    "ws_99_final.png"
+  ]
+}

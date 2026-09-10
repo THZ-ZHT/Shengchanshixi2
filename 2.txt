@@ -1,0 +1,1498 @@
+可以。按你现在已经确定的方向，我建议把前端当成一个**“可交互的 AI 图像合成展示器”**来构建，而不是普通官网。
+
+你真正需要的技术不是一个动画库，而是下面这套完整组合：
+
+> **React + TypeScript + GSAP/ScrollTrigger + Canvas/WebGL + Web Audio API + 状态机 + 预生成图像资产 + Agent API**
+
+其中最重要的是：**所有视觉效果都围绕一个 `0 → 100%` 的 Composition Progress 驱动。**
+
+---
+
+# 1. 最终前端应该是什么
+
+用户打开首页：
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ ImageCompose                              Research  Workspace │
+│                                                              │
+│                                                              │
+│                                                              │
+│                  ┌─────────────────────────┐                 │
+│                  │                         │                 │
+│                  │                         │                 │
+│                  │       核心图像           │                 │
+│                  │                         │                 │
+│                  │                         │                 │
+│                  └─────────────────────────┘                 │
+│                                                              │
+│             ●  ▂▅▇█▆▃▇█▅▂                                  │
+│                AI Agent                                     │
+│                正在分析这张图片…                             │
+│                                                              │
+│     Original ─────────────●──────────────── Final             │
+│                           58%                                │
+│                                                              │
+│       Understand  Extract  Compose  Light  Shadow  Final    │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+用户**不是通过按钮不断点击下一步**。
+
+而是：
+
+> **鼠标拖动 → 图片连续变化 → Agent 同步解释 → 当前阶段同步变化。**
+
+---
+
+# 2. 技术栈怎么选
+
+我建议：
+
+| 层          | 技术                    | 作用                  |
+| ---------- | --------------------- | ------------------- |
+| UI         | React + TypeScript    | 页面和组件               |
+| 动画         | GSAP                  | 时间线、拖动、补间           |
+| Scroll     | GSAP ScrollTrigger    | 后续滚动版本 / 自动播放       |
+| 图像层        | Canvas / WebGL        | 高性能图像叠加             |
+| SVG        | SVG + MorphSVG        | Mask / 光源 / UI形变    |
+| 音频         | Web Audio API         | Agent 波形            |
+| 状态         | Zustand / React State | 统一进度状态              |
+| 图片         | WebP / AVIF           | 分阶段图像               |
+| Agent      | REST / WebSocket      | Planner / Critic 状态 |
+| 后端         | 你们现有 Spring Boot      | 项目 / Agent / 数据     |
+| AI Service | Python                | 图像模型                |
+
+GSAP 的 ScrollTrigger 适合连续 scrub、pin、snap 等滚动控制；SVG Morph 可以直接对 SVG path 进行形态变换。([GSAP][1])
+
+原生 CSS Scroll-driven Animation 可以作为部分简单动画的增强，但目前 `animation-timeline`、`scroll()` 等仍属于有限浏览器支持特性，所以不建议把核心交互全部押在原生 CSS 上。([MDN Web Docs][2])
+
+---
+
+# 3. 最重要的架构：一个 Controller
+
+不要让：
+
+* 图片自己监听鼠标
+* Agent 自己监听鼠标
+* Progress 自己监听鼠标
+* 阶段自己监听鼠标
+
+否则很快就会乱。
+
+必须统一：
+
+```text
+                  User Input
+                     │
+        ┌────────────┼─────────────┐
+        ↓            ↓             ↓
+      Mouse         Scroll        Touch
+        │            │             │
+        └────────────┼─────────────┘
+                     ↓
+             CompositionController
+                     ↓
+              progress: 0 → 1
+                     ↓
+              currentStage
+                     ↓
+        ┌────────────┼─────────────┐
+        ↓            ↓             ↓
+      Image        Agent         UI
+      Morph        State         State
+```
+
+核心变量就是：
+
+```ts
+progress: number; // 0 ~ 1
+```
+
+所有东西都听它。
+
+---
+
+# 4. 7 个阶段的具体进度
+
+我建议：
+
+```text
+0.00 ─ 0.12   Understand
+0.12 ─ 0.28   Extract
+0.28 ─ 0.45   Compose
+0.45 ─ 0.65   Illuminate
+0.65 ─ 0.78   Ground
+0.78 ─ 0.92   Harmonize
+0.92 ─ 1.00   Critic → Final
+```
+
+例如：
+
+```text
+progress = 0.58
+```
+
+系统自动：
+
+```text
+stage = Illuminate
+stageProgress = 0.76
+```
+
+于是所有组件都知道：
+
+> 当前正在进行 04 Illuminate，已经完成 76%。
+
+---
+
+# 5. 第一套必须准备的资产：图像
+
+你们不能只准备一张 Final。
+
+至少需要：
+
+```text
+image/
+├── original.webp
+├── subject.webp
+├── mask.webp
+├── compose.webp
+├── lighting.webp
+├── shadow.webp
+├── harmonized.webp
+└── final.webp
+```
+
+但这 **8 张不是 8 个页面**。
+
+它们是：
+
+> **8 层视觉状态。**
+
+---
+
+# 6. 真正的图像结构应该是分层的
+
+最理想：
+
+```text
+ImageStage
+│
+├── BackgroundLayer
+├── SubjectLayer
+├── MaskLayer
+├── LightLayer
+├── ShadowLayer
+├── ColorGradeLayer
+└── FinalComposite
+```
+
+例如：
+
+```text
+Background
+     ↓
+Subject
+     ↓
+Shadow
+     ↓
+Light
+     ↓
+Color Grade
+```
+
+这样你可以让不同层分别响应鼠标。
+
+---
+
+# 7. Original → Extract 怎么实现
+
+不要直接：
+
+```text
+image.src = subject.webp
+```
+
+而是：
+
+```text
+Original Layer
+   ↓ opacity
+Background Layer
+   ↓ blur
+Subject Layer
+   ↓ mask
+```
+
+Progress 变化：
+
+```text
+backgroundOpacity = 1 - localProgress
+backgroundBlur = localProgress * 12
+
+subjectOpacity = localProgress
+subjectScale = 1 + localProgress * 0.015
+```
+
+结果就是：
+
+> 背景退后，主体浮出。
+
+用户会感觉到：
+
+**主体被真正“抽出来”。**
+
+---
+
+# 8. Extract → Mask
+
+这一段需要真正的 Mask。
+
+准备：
+
+```text
+subject.webp
+mask.webp
+```
+
+然后做：
+
+```text
+subject
++
+mask
+```
+
+Progress：
+
+```text
+20%
+人物正常
+
+35%
+边缘开始高亮
+
+50%
+Alpha mask 完整
+```
+
+右下角可以出现：
+
+```text
+MATTE
+
+Alpha
+98.2%
+
+Edge
+96.8%
+```
+
+---
+
+# 9. Compose 阶段需要“背景生成层”
+
+这里我不建议做复杂实时生成。
+
+后台提前生成：
+
+```text
+background.jpg
+```
+
+前端通过：
+
+```text
+clip-path
+mask-image
+opacity
+scale
+blur
+```
+
+模拟：
+
+> 环境逐渐建立。
+
+甚至可以准备：
+
+```text
+background-depth.webp
+```
+
+让前景和背景产生轻微视差。
+
+---
+
+# 10. Lighting 阶段需要 Canvas/WebGL
+
+这是建议使用 Canvas / WebGL 的地方。
+
+原因不是为了炫技，而是因为：
+
+> 你要同时控制图片、光源、渐变、遮罩。
+
+例如：
+
+```text
+            Light
+              ●
+             ↘
+              \
+               \
+              Subject
+```
+
+光源坐标：
+
+```ts
+light.x
+light.y
+```
+
+鼠标拖动：
+
+```ts
+light.x = pointer.x
+light.y = pointer.y
+```
+
+然后：
+
+```text
+light direction
+→
+lighting overlay
+→
+subject brightness
+→
+shadow direction
+```
+
+形成联动。
+
+---
+
+# 11. Lighting 的视觉效果
+
+我建议至少包含 4 层：
+
+```text
+① Directional Light
+② Soft Light
+③ Highlight
+④ Ambient Color
+```
+
+Progress：
+
+```text
+50%
+光源出现
+
+55%
+方向确认
+
+60%
+人物亮部变化
+
+65%
+背景环境光同步
+```
+
+右侧：
+
+```text
+LIGHT
+
+Direction
+32°
+
+Temperature
+4800K
+
+Intensity
+72%
+```
+
+---
+
+# 12. Shadow 阶段不要用一张静态阴影图
+
+准备：
+
+```text
+shadow-base.png
+```
+
+通过：
+
+```text
+opacity
+scaleX
+blur
+transform
+```
+
+逐渐生成。
+
+例如：
+
+```text
+0%
+无阴影
+
+30%
+脚底接触
+
+60%
+投影扩展
+
+100%
+完整阴影
+```
+
+效果应该让用户觉得：
+
+> **人物终于“站在”环境里了。**
+
+---
+
+# 13. Harmonize 要改变整张图
+
+这一阶段不是简单加一个滤镜。
+
+建议把：
+
+```text
+Color
+Contrast
+Noise
+Depth
+Sharpen
+Atmosphere
+```
+
+全部作为参数。
+
+Progress 逐渐改变：
+
+```text
+Color Difference ↓
+Noise Difference ↓
+Depth Difference ↓
+Edge Difference ↓
+```
+
+最终：
+
+> 前景和背景视觉特征一致。
+
+这和你的研究目标非常契合。你的开题报告将色彩、噪点、景深与光照、阴影一起纳入最终一致性融合。
+
+---
+
+# 14. Agent 波形用 Web Audio API
+
+这个功能非常适合 Web Audio API。
+
+`AnalyserNode` 可以实时提供频率和时域数据，然后把这些数据映射成 Canvas 波形/柱状图；它是目前广泛可用的 Web API。([MDN Web Docs][3])
+
+架构：
+
+```text
+Mic / TTS Audio
+       ↓
+AudioContext
+       ↓
+AnalyserNode
+       ↓
+FFT / Time Domain Data
+       ↓
+Canvas Waveform
+```
+
+不要使用一个固定 GIF 波形。
+
+必须是真实音频驱动。
+
+---
+
+# 15. Agent 最好做成一个非常小的“存在”
+
+例如：
+
+```text
+        ●
+    ▁▃▆████▆▃▁
+       Agent
+```
+
+而不是一个大 Chatbox。
+
+可以放在：
+
+**图片左下角 / 右下角。**
+
+这样不会抢中央图片。
+
+---
+
+# 16. Agent 的三个状态
+
+### Listening
+
+```text
+●
+```
+
+呼吸。
+
+---
+
+### Thinking
+
+```text
+◌
+```
+
+慢速旋转。
+
+---
+
+### Speaking
+
+```text
+▂▅█▇▃▇█▅▂
+```
+
+真正跟随 TTS 音频变化。
+
+Web Audio API 正好可以提供这种实时频谱/时域数据。([MDN Web Docs][4])
+
+---
+
+# 17. Agent 文字也必须跟随状态
+
+例如：
+
+### Understanding
+
+> 正在识别主体与环境。
+
+### Extract
+
+> 我已经识别出主体，正在计算边缘。
+
+### Compose
+
+> 正在建立新的场景关系。
+
+### Illuminate
+
+> 环境光来自左上方，我正在重新调整人物光照。
+
+### Shadow
+
+> 正在建立主体与地面的接触关系。
+
+### Harmonize
+
+> 正在统一色温、景深与画面质感。
+
+### Critic
+
+> 我发现阴影略弱，正在重新优化。
+
+最后：
+
+> 合成完成。
+
+---
+
+# 18. 这是非常关键的“同步关系”
+
+比如：
+
+```text
+Progress = 0.58
+```
+
+同时：
+
+```text
+Image
+→ Lighting 76%
+
+Agent
+→ Speaking
+
+Text
+→ “正在调整人物光照”
+
+UI
+→ Illuminate Active
+
+Light
+→ visible
+```
+
+**所有东西必须同步。**
+
+这才有高级感。
+
+---
+
+# 19. 上传界面具体怎么做
+
+## 初始
+
+```text
+┌─────────────────────────────┐
+│                             │
+│       Upload Image          │
+│                             │
+│     Drag & Drop             │
+│     JPG / PNG / WEBP        │
+│                             │
+│       [ Try Demo ]          │
+│                             │
+└─────────────────────────────┘
+```
+
+---
+
+## 上传
+
+```text
+IMAGE RECEIVED
+
+████████░░ 82%
+
+Preparing…
+```
+
+---
+
+## 分析
+
+```text
+ANALYZING IMAGE
+
+✓ Upload
+✓ Decode
+● Detect Subject
+○ Estimate Scene
+○ Prepare Composition
+```
+
+---
+
+## 完成
+
+整个上传卡：
+
+```text
+scale: 1
+```
+
+变成：
+
+```text
+scale: 0.55
+```
+
+然后：
+
+```text
+translate → center
+```
+
+最终：
+
+> **Morph into Canvas**
+
+这个动画非常值得做。
+
+---
+
+# 20. Demo 模式
+
+首页必须有：
+
+```text
+Try Demo
+```
+
+点击：
+
+```text
+Demo Image
++
+Demo Instruction
+```
+
+直接进入 Interactive。
+
+这样第一次访问的人不需要先上传照片。
+
+---
+
+# 21. Demo 图片最好固定一种“叙事明确”的素材
+
+比如：
+
+**人物 + 环境明显不同的原图。**
+
+不要选择本身就很漂亮、变化不明显的图片。
+
+最好：
+
+```text
+Original
+人物在普通室内
+
+Final
+人物在夕阳户外
+```
+
+因为：
+
+> **差异必须非常明显。**
+
+用户才能立即看懂 Morph。
+
+---
+
+# 22. 鼠标 Drag 的实现
+
+核心：
+
+```text
+pointerdown
+↓
+pointermove
+↓
+pointerup
+```
+
+计算：
+
+```ts
+progress += deltaX / stageWidth;
+```
+
+限制：
+
+```text
+0 ≤ progress ≤ 1
+```
+
+然后：
+
+```text
+requestAnimationFrame
+↓
+render(progress)
+```
+
+这里不要 React 每一帧重新 render。
+
+---
+
+# 23. React 与动画要分离
+
+React：
+
+负责：
+
+* UI
+* 状态
+* 数据
+
+GSAP / Canvas：
+
+负责：
+
+* 60fps 动画
+* 图片
+* 光线
+* Morph
+
+例如：
+
+```text id="5prmpb"
+React State
+
+progress = 0.62
+```
+
+真正渲染：
+
+```text id="44w7n3"
+CanvasRenderer.render(progress)
+```
+
+不要：
+
+```text id="4ryxvr"
+setState()
+setState()
+setState()
+```
+
+每帧修改 React state 容易导致没必要的重新渲染。
+
+---
+
+# 24. 页面组件结构
+
+建议直接这样：
+
+```text
+App
+└── ShowcasePage
+    │
+    ├── Header
+    │
+    ├── UploadStage
+    │
+    ├── ImageStage
+    │   ├── BackgroundLayer
+    │   ├── SubjectLayer
+    │   ├── MaskLayer
+    │   ├── LightingLayer
+    │   ├── ShadowLayer
+    │   └── FinalLayer
+    │
+    ├── AgentPresence
+    │   ├── VoiceWaveform
+    │   ├── AgentStatus
+    │   └── AgentCaption
+    │
+    ├── CompositionRail
+    │
+    └── StageIndicator
+```
+
+---
+
+# 25. 状态系统
+
+建议：
+
+```ts
+type Stage =
+  | "empty"
+  | "uploading"
+  | "processing"
+  | "understand"
+  | "extract"
+  | "compose"
+  | "illuminate"
+  | "ground"
+  | "harmonize"
+  | "critic"
+  | "final";
+```
+
+另外：
+
+```ts
+interface CompositionState {
+  progress: number;
+  stage: Stage;
+  isDragging: boolean;
+  agentState: "idle" | "listening" | "thinking" | "speaking";
+}
+```
+
+---
+
+# 26. 最核心的 Motion 规范
+
+我建议统一：
+
+### 普通 UI
+
+`180–240ms`
+
+### Image Morph
+
+`400–800ms`
+
+### Agent 出现
+
+`300–500ms`
+
+### Final
+
+`800–1200ms`
+
+### 缓动
+
+尽量使用：
+
+```text
+ease-out
+ease-in-out
+```
+
+不要满页面弹簧。
+
+---
+
+# 27. Hover 不要过度
+
+用户 Hover 图片：
+
+```text
+Subject
+```
+
+出现细线。
+
+Hover 光源：
+
+```text
+Light source
+```
+
+出现参数。
+
+Hover 阶段：
+
+```text
+Lighting
+```
+
+出现：
+
+> 环境光估计 / 重打光
+
+这样会有一种：
+
+> **“这个页面其实是一台机器。”**
+
+的感觉。
+
+---
+
+# 28. 加一个很重要的“Debug / Research Overlay”
+
+开发阶段必须有。
+
+例如：
+
+```text
+Progress: 0.641
+Stage: Illuminate
+StageProgress: 0.76
+FPS: 58
+Agent: speaking
+```
+
+正式版隐藏。
+
+这样前端调动画会舒服很多。
+
+---
+
+# 29. 图片资源的实际规格
+
+建议：
+
+### 主图
+
+`2048 × 1365` 或类似 3:2 / 16:10 比例。
+
+### Mask
+
+PNG / WebP alpha。
+
+### Light
+
+透明 PNG / Canvas shader。
+
+### Shadow
+
+透明 PNG。
+
+### UI 图标
+
+SVG。
+
+### Agent 波形
+
+Canvas。
+
+不要用一张巨大的 JPG 把所有东西合成。
+
+---
+
+# 30. 为什么 Canvas/WebGL 值得用
+
+你的需求同时包含：
+
+* 图片
+* Mask
+* 光照
+* 阴影
+* 视差
+* 透明度
+* 混合
+* 大图
+
+所以 Canvas/WebGL 可以把这些视觉层放在同一个 render pipeline 中。
+
+但我不建议一开始直接写完整 WebGL shader。
+
+第一版：
+
+**HTML/CSS + Canvas**
+
+已经够用。
+
+第二版再：
+
+**WebGL Shader**
+
+优化 Lighting / Shadow。
+
+---
+
+# 31. CSS 应该负责什么
+
+CSS：
+
+* 布局
+* Typography
+* Hover
+* opacity
+* transform
+* 简单 blur
+* UI transition
+
+Canvas：
+
+* 图片
+* Mask
+* 光源
+* Shadow
+
+GSAP：
+
+* 状态切换
+* Timeline
+* Drag
+* Snap
+* Morph
+
+Web Audio：
+
+* Agent 波形
+
+这样职责非常清楚。
+
+---
+
+# 32. Scroll-driven 不应该消失
+
+虽然现在你说首页主要靠鼠标，但之前的 Scroll-driven Morphing 其实可以保留成第二种入口：
+
+```text
+Mouse Drag
+      ↓
+Composition Progress
+
+Scroll
+      ↓
+Composition Progress
+```
+
+也就是说：
+
+**同一个 Progress Controller。**
+
+以后产品可以支持：
+
+```text
+Desktop:
+Mouse Drag
+
+Presentation:
+Scroll
+
+Mobile:
+Swipe
+```
+
+完全不用重写动画。
+
+---
+
+# 33. 甚至可以增加一个“Auto Play”
+
+用户进入首页，不操作。
+
+5 秒后：
+
+```text
+Original
+→
+Extract
+→
+Compose
+→
+Lighting
+→
+Final
+```
+
+然后停下来：
+
+> **Try it yourself**
+
+这样展厅、答辩、录屏都很好用。
+
+---
+
+# 34. 首页最终应该有三个模式
+
+## Explore
+
+自动播放。
+
+## Control
+
+用户鼠标拖动。
+
+## Create
+
+用户上传自己的图片并进入真实 Agent。
+
+这是我觉得最合理的产品流程：
+
+```text
+Explore
+  ↓
+Control
+  ↓
+Understand
+  ↓
+Upload
+  ↓
+Create
+```
+
+---
+
+# 35. 首页与工作台必须分离
+
+### 首页
+
+任务：
+
+> **展示“这套技术能做到什么”。**
+
+所以：
+
+**沉浸、华丽、交互。**
+
+### 工作台
+
+任务：
+
+> **让用户真的完成任务。**
+
+所以：
+
+**专业、稳定、高信息密度。**
+
+---
+
+# 36. 工作台还是你们之前的三栏
+
+```text
+┌────────────┬──────────────────────┬──────────────┐
+│ Assets     │ Canvas               │ Agent        │
+│            │                      │              │
+│ Original   │                      │ Chat         │
+│ Mask       │       Image          │ Plan         │
+│ Background │                      │ Critic       │
+│            │                      │              │
+├────────────┴──────────────────────┴──────────────┤
+│ Execution DAG / History / Rollback               │
+└───────────────────────────────────────────────────┘
+```
+
+首页和工作台共享：
+
+```text
+ImageStage
+Agent
+DAG
+```
+
+这样开发成本也不会浪费。
+
+---
+
+# 37. 前端真正需要准备的东西
+
+你可以直接把下面这张表交给前端队友。
+
+## 视觉资产
+
+| 资产             | 必需 |
+| -------------- | -- |
+| Original       | ✓  |
+| Subject        | ✓  |
+| Mask           | ✓  |
+| Background     | ✓  |
+| Lighting       | ✓  |
+| Shadow         | ✓  |
+| Harmonized     | ✓  |
+| Final          | ✓  |
+| Light Overlay  | ✓  |
+| Shadow Overlay | ✓  |
+| Agent Logo     | ✓  |
+| UI Icons       | ✓  |
+
+---
+
+## 开发模块
+
+| 模块                    | 必需     |
+| --------------------- | ------ |
+| CompositionController | **必须** |
+| ImageRenderer         | **必须** |
+| AgentPresence         | **必须** |
+| WaveformRenderer      | **必须** |
+| UploadStage           | **必须** |
+| ProcessingStage       | **必须** |
+| StageIndicator        | **必须** |
+| CompositionRail       | **必须** |
+| CriticView            | 第二阶段   |
+| Workspace             | 第二阶段   |
+
+---
+
+# 38. 前端最终验收标准
+
+## 视觉
+
+必须达到：
+
+> 用户第一眼先看到图片，而不是 UI。
+
+---
+
+## 交互
+
+必须做到：
+
+> 鼠标左右拖动，图像连续变化。
+
+不是切图。
+
+---
+
+## Agent
+
+必须做到：
+
+> 说话时波形真实跳动，Thinking 时停止，Listening 时呼吸。
+
+Web Audio API 的 `AnalyserNode` 就可以提供实时频率/时域数据来驱动这种视觉。([MDN Web Docs][5])
+
+---
+
+## 上传
+
+必须做到：
+
+> Upload → Processing → Ready → Upload Card Morph into Canvas。
+
+---
+
+## 图像
+
+必须做到：
+
+```text
+Original
+→
+Subject
+→
+Mask
+→
+Background
+→
+Lighting
+→
+Shadow
+→
+Harmonization
+→
+Final
+```
+
+连续变化。
+
+---
+
+## 产品
+
+最终用户不需要理解：
+
+> BiRefNet / IC-Light / Diffusion / VLM
+
+但用户应该感受到：
+
+> **AI 正在一步一步把这张图片变成最终结果。**
+
+这才是正确的前端表达。
+
+---
+
+# 39. 我建议你们开发顺序也严格按照这个来
+
+### Phase 1 — 空页面
+
+```text
+Header
++
+Canvas
++
+Agent
++
+Bottom Rail
+```
+
+### Phase 2 — 鼠标控制
+
+```text
+Mouse
+→
+Progress
+```
+
+### Phase 3 — Image Morph
+
+```text
+Original
+→
+Final
+```
+
+先让一张图连续变起来。
+
+### Phase 4 — 7 状态
+
+```text
+Understand
+Extract
+Compose
+Illuminate
+Ground
+Harmonize
+Final
+```
+
+### Phase 5 — Agent
+
+```text
+Voice
+Waveform
+Caption
+Status
+```
+
+### Phase 6 — Upload
+
+```text
+Upload
+Processing
+Ready
+```
+
+### Phase 7 — 真 AI
+
+```text
+API
+→
+Planner
+→
+Pipeline
+→
+Critic
+```
+
+### Phase 8 — Workspace
+
+进入真正编辑。
+
+---
+
+# 40. 最终效果，我建议你把它理解成这样
+
+不是：
+
+> **“一个网站里有很多漂亮动画。”**
+
+而是：
+
+> **“用户拿鼠标推动一张图片，从现实状态逐渐进入 AI 重构状态。”**
+
+整个体验：
+
+```text
+                    用户
+                     │
+               上传 / Demo
+                     ↓
+                  图片
+                     ↓
+               AI 开始说话
+                     ↓
+          ┌────────────────────┐
+          │                    │
+          │     ImageStage     │
+          │                    │
+          │ Original → Final   │
+          │                    │
+          └────────────────────┘
+                     ↑
+                  Mouse
+               ←────────→
+                     │
+                 Progress
+                     │
+          ┌──────────┼──────────┐
+          ↓          ↓          ↓
+        Image       Agent      UI
+        Morph       Voice      Stage
+          │          │          │
+          └──────────┼──────────┘
+                     ↓
+                   Critic
+                     ↓
+                   Final
+                     ↓
+                 Workspace
+```
+
+**这就是我建议你们真正实现的前端架构。**
+
+而且它与开题报告的研究链路是直接对应的：高精度抠取、背景生成、光影一致性融合、VLM Critic、语音交互，以及可回放/回滚的 Agent 执行机制，都可以成为这个首页“可操作的视觉状态”，而不是静态介绍。 
+
+最关键的是：**先把 `CompositionController + ImageStage + AgentPresence` 三个核心组件做出来。** 这三个一旦成立，你后面的 7 个阶段、上传动画、语音波形、滚动模式、真实 AI 接入都只是往同一套状态系统里填内容，而不会再次推翻前端架构。
+
+[1]: https://gsap.com/docs/v3/Plugins/MorphSVGPlugin/?utm_source=chatgpt.com "MorphSVG | GSAP | Docs & Learning"
+[2]: https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/animation-timeline?utm_source=chatgpt.com "animation-timeline CSS property - CSS | MDN"
+[3]: https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Visualizations_with_Web_Audio_API?utm_source=chatgpt.com "Visualizations with Web Audio API - Web APIs | MDN"
+[4]: https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Basic_concepts_behind_Web_Audio_API?utm_source=chatgpt.com "Basic concepts behind Web Audio API - Web APIs | MDN"
+[5]: https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode?utm_source=chatgpt.com "AnalyserNode - Web APIs | MDN"
